@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ley de gravedad aplicada a los sueños</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Space+Grotesk:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        /* Paleta fría, azulada: el mismo frío melancólico que la niebla
+           de la escena, no un cálido de vela. */
+        --ink: #dfe6ee;
+        --ink-dim: #9caebd;
+        --ink-faint: #6d7f8e;
+        --ink-soft: #d8dfe5;
+        --glow: 176, 205, 230;
+        --veil: rgba(11, 14, 18, 0.5);
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #2b333c;
+      }
+
+      canvas {
+        display: block;
+      }
+
+      /* El overlay difumina la escena de fondo (blur del canvas detrás)
+         para que nunca compita en contraste con el texto, tanto al inicio
+         como al pausar. La transición de opacidad/blur reemplaza el viejo
+         display:none, así el desenfoque entra y sale con un fundido. */
+      #blocker {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow-y: auto;
+        overflow-x: hidden;
+        cursor: pointer;
+        z-index: 10;
+        background:
+          radial-gradient(ellipse 60% 52% at 50% 42%, rgba(8, 10, 14, 0.32), rgba(8, 10, 14, 0) 72%),
+          var(--veil);
+        backdrop-filter: blur(15px) brightness(0.6) saturate(0.8);
+        -webkit-backdrop-filter: blur(15px) brightness(0.6) saturate(0.8);
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.7s ease, backdrop-filter 0.7s ease, visibility 0s linear 0s;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      #blocker.hidden {
+        opacity: 0;
+        pointer-events: none;
+        backdrop-filter: blur(0px) brightness(1) saturate(1);
+        -webkit-backdrop-filter: blur(0px) brightness(1) saturate(1);
+        transition: opacity 0.5s ease, backdrop-filter 0.5s ease, visibility 0s linear 0.5s;
+        visibility: hidden;
+      }
+
+      /* Grano fílmico sutil: textura melancólica, no una señal de jerarquía. */
+      #grain {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.045;
+        mix-blend-mode: overlay;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        background-size: 180px 180px;
+      }
+
+      /* ---------- Atmósfera: destellos borrosos tipo bokeh sobre los
+         bordes, y motas de luz que derivan despacio hacia arriba, como
+         polvo o luces lejanas fuera de foco. Pura decoración, no roba
+         foco del texto (queda detrás, muy tenue). ---------- */
+      #atmos {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+      .bokeh {
+        position: absolute;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle,
+          rgba(var(--glow), 0.16) 0%,
+          rgba(var(--glow), 0.05) 45%,
+          rgba(var(--glow), 0) 72%
+        );
+        animation: bokeh-drift 20s ease-in-out infinite alternate;
+      }
+      .bokeh--a {
+        width: 360px;
+        height: 360px;
+        left: -130px;
+        top: 8%;
+        animation-duration: 23s;
+      }
+      .bokeh--b {
+        width: 240px;
+        height: 240px;
+        left: -60px;
+        top: 62%;
+        animation-duration: 17s;
+        animation-delay: -5s;
+      }
+      .bokeh--c {
+        width: 300px;
+        height: 300px;
+        right: -110px;
+        top: 46%;
+        animation-duration: 21s;
+        animation-delay: -9s;
+      }
+      .bokeh--d {
+        width: 190px;
+        height: 190px;
+        right: -50px;
+        top: 6%;
+        animation-duration: 15s;
+        animation-delay: -3s;
+      }
+      @keyframes bokeh-drift {
+        0% {
+          transform: translateY(0) scale(1);
+        }
+        100% {
+          transform: translateY(-30px) scale(1.08);
+        }
+      }
+      .mote {
+        position: absolute;
+        left: var(--x);
+        top: var(--y);
+        width: 3px;
+        height: 3px;
+        border-radius: 50%;
+        background: rgb(var(--glow));
+        box-shadow: 0 0 7px 1px rgba(var(--glow), 0.55);
+        animation: mote-float var(--d) ease-in-out infinite;
+        animation-delay: var(--delay);
+        opacity: 0;
+      }
+      @keyframes mote-float {
+        0% {
+          transform: translateY(14px);
+          opacity: 0;
+        }
+        18% {
+          opacity: 0.55;
+        }
+        50% {
+          transform: translateY(-44px);
+          opacity: 0.3;
+        }
+        84% {
+          opacity: 0.5;
+        }
+        100% {
+          transform: translateY(-96px);
+          opacity: 0;
+        }
+      }
+
+      #intro {
+        position: relative;
+        box-sizing: border-box;
+        max-width: min(880px, 92vw);
+        width: 100%;
+        margin: auto;
+        padding: 2.4rem 2rem 1.6rem;
+        text-align: center;
+      }
+
+      /* ---------- Ornamento: línea + un pequeño rulo + una curva suave
+         que converge en un dije colgante al centro. Reemplaza cualquier
+         línea recta divisoria; el filtro le da un borde apenas
+         irregular, como una talla antigua y desgastada, no vector limpio. ---------- */
+      .ornament {
+        display: block;
+        margin: 1.1rem auto;
+        color: var(--ink-faint);
+        filter: drop-shadow(0 0 5px rgba(var(--glow), 0.3)) drop-shadow(0 0 13px rgba(var(--glow), 0.14));
+      }
+      .ornament--lg {
+        width: clamp(210px, 34vw, 340px);
+        height: auto;
+      }
+
+      .title {
+        margin: 0;
+        font-family: 'Cinzel', 'Cormorant Garamond', serif;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: clamp(1.9rem, 4.6vw, 3.1rem);
+        line-height: 1.3;
+        letter-spacing: 0.05em;
+        color: var(--ink);
+        text-wrap: balance;
+        text-shadow: 0 0 10px rgba(var(--glow), 0.4), 0 0 26px rgba(var(--glow), 0.2), 0 0 52px rgba(var(--glow), 0.1);
+        animation: title-glitch 8s infinite;
+      }
+      /* Pequeños glitches ocasionales, no un temblor constante: casi
+         todo el ciclo la tipografía queda quieta, y una vez cada tanto
+         se corrompe un instante, como el glitch del propio instrumento. */
+      @keyframes title-glitch {
+        0%,
+        90%,
+        100% {
+          transform: translate(0, 0);
+          filter: none;
+        }
+        90.6% {
+          transform: translate(-3px, 0);
+          filter: drop-shadow(2px 0 0 rgba(120, 175, 255, 0.45)) drop-shadow(-2px 0 0 rgba(255, 130, 160, 0.32));
+        }
+        91.1% {
+          transform: translate(2px, 1px);
+          filter: drop-shadow(-2px 0 0 rgba(120, 175, 255, 0.4)) drop-shadow(2px 0 0 rgba(255, 130, 160, 0.28));
+        }
+        91.6% {
+          transform: translate(-1px, 0);
+          filter: drop-shadow(1px 0 0 rgba(120, 175, 255, 0.3));
+        }
+        92.1% {
+          transform: translate(0, 0);
+          filter: none;
+        }
+      }
+
+      .subtitle {
+        margin: 0;
+        font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+        font-style: italic;
+        font-weight: 400;
+        font-size: clamp(0.95rem, 1.7vw, 1.15rem);
+        letter-spacing: 0.045em;
+        color: var(--ink-dim);
+      }
+
+      .cta {
+        margin: 1.6rem 0 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.85rem;
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 500;
+        font-size: clamp(0.85rem, 1.5vw, 1rem);
+        letter-spacing: 0.15em;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .cta-mark {
+        width: 13px;
+        height: 13px;
+        color: var(--ink-faint);
+        filter: drop-shadow(0 0 4px rgba(var(--glow), 0.3));
+        transition: color 0.4s ease, filter 0.4s ease;
+      }
+      .cta-text {
+        transition: text-shadow 0.4s ease;
+      }
+      .cta-text--resume {
+        display: none;
+      }
+      #blocker.is-paused .cta-text--start {
+        display: none;
+      }
+      #blocker.is-paused .cta-text--resume {
+        display: inline;
+      }
+      #blocker:hover .cta-text {
+        text-shadow: 0 0 12px rgba(var(--glow), 0.55), 0 0 26px rgba(var(--glow), 0.28);
+      }
+      #blocker:hover .cta-mark {
+        color: var(--ink);
+        filter: drop-shadow(0 0 8px rgba(var(--glow), 0.55));
+      }
+
+      /* ---------- Controles: teclas dibujadas, no texto con guiones.
+         Va pegado al CTA (mismo grupo: "cómo interactuar"). ---------- */
+      .controls {
+        margin: 0.9rem 0 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        justify-content: center;
+        column-gap: clamp(2rem, 5vw, 3.5rem);
+        row-gap: 1.4rem;
+      }
+      .control {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.55rem;
+      }
+      .keys {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3rem;
+        min-height: 2.3rem;
+      }
+      kbd {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 1.9rem;
+        height: 1.9rem;
+        padding: 0 0.35rem;
+        box-sizing: border-box;
+        border: 1px solid var(--ink-dim);
+        border-radius: 5px;
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 0.78rem;
+        font-weight: 500;
+        font-style: normal;
+        color: var(--ink);
+        background: rgba(210, 224, 236, 0.05);
+        box-shadow: 0 0 9px rgba(var(--glow), 0.16), inset 0 0 7px rgba(var(--glow), 0.07);
+      }
+      kbd.kbd-wide {
+        min-width: 3rem;
+        padding: 0 0.6rem;
+        letter-spacing: 0.04em;
+      }
+      .keys-or {
+        margin: 0 0.35rem;
+        font-family: 'Cormorant Garamond', serif;
+        font-style: italic;
+        font-size: 0.82rem;
+        color: var(--ink-faint);
+      }
+      .icon-arrows {
+        display: inline-grid;
+        grid-template-columns: repeat(3, 1.35rem);
+        grid-template-rows: repeat(2, 1.35rem);
+        grid-template-areas: '. up .' 'left down right';
+        gap: 2px;
+        vertical-align: middle;
+      }
+      kbd.kbd-mini {
+        min-width: 0;
+        width: 1.35rem;
+        height: 1.35rem;
+        font-size: 0.6rem;
+        border-radius: 4px;
+      }
+      .kbd-mini--up {
+        grid-area: up;
+      }
+      .kbd-mini--left {
+        grid-area: left;
+      }
+      .kbd-mini--down {
+        grid-area: down;
+      }
+      .kbd-mini--right {
+        grid-area: right;
+      }
+      .icon-mouse {
+        display: inline-flex;
+        color: var(--ink);
+        filter: drop-shadow(0 0 8px rgba(var(--glow), 0.18));
+      }
+      .control-label {
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 400;
+        font-size: clamp(0.62rem, 1vw, 0.7rem);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ink-dim);
+      }
+
+      .context {
+        margin: 1.6rem auto 0;
+        max-width: min(680px, 82vw);
+        font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+        font-style: italic;
+        font-weight: 400;
+        font-size: clamp(0.9rem, 1.25vw, 1.05rem);
+        line-height: 1.8;
+        letter-spacing: 0.006em;
+        color: var(--ink-soft);
+      }
+      #blocker.is-paused .context {
+        display: none;
+      }
+
+      .signature {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 1.7rem;
+        margin: 0;
+        text-align: center;
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 300;
+        font-size: 0.64rem;
+        letter-spacing: 0.07em;
+        color: var(--ink-faint);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="blocker">
+      <div id="grain"></div>
+      <div id="atmos" aria-hidden="true">
+        <span class="bokeh bokeh--a"></span>
+        <span class="bokeh bokeh--b"></span>
+        <span class="bokeh bokeh--c"></span>
+        <span class="bokeh bokeh--d"></span>
+        <span class="mote" style="--x: 4%; --y: 22%; --d: 14s; --delay: -2s"></span>
+        <span class="mote" style="--x: 8%; --y: 52%; --d: 18s; --delay: -6s"></span>
+        <span class="mote" style="--x: 3%; --y: 76%; --d: 12s; --delay: -9s"></span>
+        <span class="mote" style="--x: 10%; --y: 12%; --d: 15s; --delay: -7s"></span>
+        <span class="mote" style="--x: 94%; --y: 30%; --d: 16s; --delay: -4s"></span>
+        <span class="mote" style="--x: 90%; --y: 60%; --d: 13s; --delay: -11s"></span>
+        <span class="mote" style="--x: 96%; --y: 84%; --d: 20s; --delay: -1s"></span>
+        <span class="mote" style="--x: 92%; --y: 10%; --d: 17s; --delay: -3s"></span>
+      </div>
+      <div id="intro">
+        <h1 class="title">Ley de gravedad aplicada a los sueños</h1>
+
+        <svg class="ornament ornament--lg" viewBox="0 0 360 44" aria-hidden="true">
+          <defs>
+            <filter id="ornament-rough" x="-20%" y="-60%" width="140%" height="220%">
+              <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="7" result="noise" />
+              <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.7" xChannelSelector="R" yChannelSelector="G" />
+            </filter>
+            <g id="flourish-half">
+              <line x1="0" y1="22" x2="66" y2="22" stroke="currentColor" stroke-width="1" />
+              <path
+                d="M66,22 C66,14 78,12 82,18 C85,23 78,26 74,22 C72,20 73,17 76,17"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1"
+              />
+              <path d="M82,18 C112,9 146,14 178,22" fill="none" stroke="currentColor" stroke-width="1" />
+            </g>
+          </defs>
+          <g filter="url(#ornament-rough)">
+            <use href="#flourish-half" />
+            <use href="#flourish-half" transform="translate(360,0) scale(-1,1)" />
+            <path d="M180,22 C177,25.5 177,30.5 180,35 C183,30.5 183,25.5 180,22 Z" fill="currentColor" />
+          </g>
+        </svg>
+
+        <p class="subtitle">un instrumento hauntológico</p>
+
+        <p class="cta">
+          <svg class="cta-mark" viewBox="0 0 20 20" aria-hidden="true">
+            <path
+              d="M10,1 C11.8,7.3 12.7,8.2 19,10 C12.7,11.8 11.8,12.7 10,19 C8.2,12.7 7.3,11.8 1,10 C7.3,8.2 8.2,7.3 10,1 Z"
+              fill="currentColor"
+            />
+          </svg>
+          <span class="cta-text cta-text--start">click para caminar</span>
+          <span class="cta-text cta-text--resume">click para continuar</span>
+          <svg class="cta-mark" viewBox="0 0 20 20" aria-hidden="true">
+            <path
+              d="M10,1 C11.8,7.3 12.7,8.2 19,10 C12.7,11.8 11.8,12.7 10,19 C8.2,12.7 7.3,11.8 1,10 C7.3,8.2 8.2,7.3 10,1 Z"
+              fill="currentColor"
+            />
+          </svg>
+        </p>
+
+        <div class="controls">
+          <div class="control">
+            <span class="keys">
+              <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>
+              <span class="keys-or">o</span>
+              <span class="icon-arrows" aria-hidden="true">
+                <kbd class="kbd-mini kbd-mini--up">↑</kbd>
+                <kbd class="kbd-mini kbd-mini--left">←</kbd>
+                <kbd class="kbd-mini kbd-mini--down">↓</kbd>
+                <kbd class="kbd-mini kbd-mini--right">→</kbd>
+              </span>
+            </span>
+            <span class="control-label">moverse</span>
+          </div>
+
+          <div class="control">
+            <span class="keys">
+              <span class="icon-mouse" aria-hidden="true">
+                <svg viewBox="0 0 22 34" width="22" height="34">
+                  <rect x="1" y="1" width="20" height="32" rx="10" fill="none" stroke="currentColor" stroke-width="1.4" />
+                  <line x1="11" y1="7" x2="11" y2="14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                </svg>
+              </span>
+            </span>
+            <span class="control-label">mirar</span>
+          </div>
+
+          <div class="control">
+            <span class="keys"><kbd class="kbd-wide">ESC</kbd></span>
+            <span class="control-label">pausa</span>
+          </div>
+        </div>
+
+        <p class="context">
+          Este instrumento intenta construir una canción que nunca llega a su estribillo. Cada vez que casi lo logra, todo se desmorona y vuelve a empezar. Alrededor, entre la niebla, otros instrumentos ya alcanzaron su forma perfecta. Este no. Es un monumento a un futuro que se prometió y no llegó. Y a la belleza de seguir intentándolo igual.
+        </p>
+      </div>
+      <p class="signature">Daniela Montión, Diplomatura en IA aplicada al arte multimedial, UNA</p>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
