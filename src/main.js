@@ -929,9 +929,12 @@ loader.load(
       sound.setLoop(true);
       sound.setVolume(THREE.MathUtils.lerp(0.12, 0.38, completeness));
       sound.setPlaybackRate(THREE.MathUtils.lerp(0.84, 0.97, completeness));
+      // Rango muy corto a propósito: en silencio total desde el centro y
+      // desde los demás instrumentos, solo aparece al caminar bien cerca
+      // de este en particular — nada de mezcla con la melodía central.
       sound.setDistanceModel('linear');
-      sound.setRefDistance(Math.max(maxDim * 0.9, 0.6));
-      sound.setMaxDistance(maxDim * 6);
+      sound.setRefDistance(Math.max(maxDim * 0.4, 0.35));
+      sound.setMaxDistance(maxDim * 1.3);
       sound.setRolloffFactor(1);
       const sonicLowpass = audioCtx.createBiquadFilter();
       sonicLowpass.type = 'lowpass';
