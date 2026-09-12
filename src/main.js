@@ -27,21 +27,15 @@ const CENTRAL_EMBER_MAX = 0.55; // apenas sube con el termómetro — sigue "apa
 const FALL_GLOW_BOOST = 1.1;
 const FALL_GLOW_DURATION = 0.8; // segundos hasta apagarse del todo
 
-// Los instrumentos ajenos ya "coronaron": siempre cálidos, luminosos,
-// perfectos — nunca pasan por el ciclo frío del central.
+// Los instrumentos ajenos también quedaron a mitad de camino: ni cálidos
+// ni completos, compañeros del mismo fracaso que el central, no versiones
+// perfectas de un futuro que él no alcanzó. Sin aura, sin brillo pleno,
+// estáticos — no pasan por ningún ciclo, ya están detenidos así.
 const COLOR_ACHIEVED = new THREE.Color(0xc98a63);
-const OTHERS_COUNT = 6; // copias completas alrededor, a distancia media
-// Cuerpo sólido y opaco siempre (la niebla ya los suaviza con la distancia);
-// el brillo cálido se ve en la intensidad emisiva, no en la transparencia.
-const OTHERS_EMISSIVE_MIN = 0.75; // sin luces reales de piso (costoso), compensa con más brasa propia
-const OTHERS_EMISSIVE_MAX = 1.7; // más luminosos cerca del clímax del central
-
-// Partículas: aura constante y luminosa en los ajenos ("perfección
-// constante"); en el central, apenas unas pocas y tenues, solo al borde
-// del clímax, que se apagan de golpe con el glitch — intenta brillar y
-// no puede sostenerlo.
-const OTHERS_PARTICLES_PER_INSTRUMENT = 40;
-const OTHERS_PARTICLE_OPACITY = 0.55; // brillo constante del polvo de luz ajeno
+const OTHERS_COUNT = 6; // copias incompletas alrededor, a distancia media
+const OTHERS_EMISSIVE = 0.16; // brasa apagada y fija, no un brillo de logro
+// Cada copia se arma a partir del mismo molde incompleto (faltan tubos,
+// ver más abajo), así que no hace falta geometría distinta por instancia.
 const CENTRAL_PARTICLE_COUNT = 26;
 const CENTRAL_PARTICLE_MAX_OPACITY = 0.3; // tenue, nunca compite con los ajenos
 const CENTRAL_PARTICLE_CLIMAX_START = 0.85; // fracción de MAX_WARMTH desde la que aparecen
@@ -459,12 +453,15 @@ const AUDIO_FADE_IN = 1.6; // segundos de fundido de entrada al reiniciar el aud
 const AUDIO_FADE_OUT_DELAY = 1.8; // segundos de margen tras asentarse, para que se termine de escuchar el glitch
 const AUDIO_FADE_OUT = 1.3; // segundos: el audio se apaga junto con el desmoronamiento, ni cortado ni de más
 const GRAVITY = 9.8; // unidades/s² — caída de construcción (rápida, "encaja")
-const COLLAPSE_GRAVITY = 5.2; // más lenta que la de construcción: el desmoronamiento se saborea, no se apura
+// Desmoronamiento lento y largo, a propósito: más tiempo de caída y de
+// ruina antes de que empiece la pausa contemplativa, para que la pérdida
+// pese más.
+const COLLAPSE_GRAVITY = 3.0; // bastante más lenta que la de construcción: cae casi a cámara lenta
 const FLOOR_Y = 0.02;
 const DROP_HEIGHT = 1.2; // altura desde la que cada tubo "cae" hasta encajar en su lugar
 const BUILD_LEAD = 1.5; // segundos que el instrumento queda completo y tenso antes del glitch
 const BUILD_DURATION = GLITCH_TIME - BUILD_LEAD; // ventana en la que se arma, uno a uno
-const FALL_STAGGER_MAX = 1.0; // ventana de desfasaje al caer, repartida en orden mezclado — más ancha, más tiempo para oír el glitch
+const FALL_STAGGER_MAX = 2.4; // ventana de desfasaje al caer, mucho más ancha: el desmoronamiento se extiende
 
 // Fisher-Yates: un orden de caída realmente disperso, desacoplado de la
 // posición espacial — si no, la física (los tubos más altos tardan más en
@@ -487,6 +484,25 @@ const GLITCH_FX_DURATION = 0.45; // segundos que dura la distorsión visual
 
 const audio = new Audio('/futuro_que_nunca_llega.wav');
 audio.preload = 'auto';
+// Sin esto, el navegador corrige el tono al cambiar playbackRate (queda
+// más rápido/lento pero con el mismo tono) — acá queremos lo contrario:
+// que el desgaste entre ciclos también se oiga como un tono que decae.
+audio.preservesPitch = false;
+audio.mozPreservesPitch = false;
+audio.webkitPreservesPitch = false;
+
+// ---------- Desgaste entre intentos ----------
+// Cada vuelta del loop deja una marca: el audio se oye un poco más
+// arrastrado/grave, y el armado encaja con una imprecisión creciente — la
+// acumulación silenciosa del fracaso. Se estabiliza en un techo (no crece
+// para siempre) para que siga leyéndose como desgaste y no como ruptura.
+let cycleCount = 0;
+const DEGRADATION_MAX_CYCLES = 10;
+const AUDIO_DEGRADATION_PER_CYCLE = 0.012; // el playbackRate baja esto por ciclo
+const AUDIO_MIN_PLAYBACK_RATE = 0.88;
+const ASSEMBLY_JITTER_FRACTION_PER_CYCLE = 0.0035; // fracción de fogScale, por ciclo
+const ASSEMBLY_ROT_JITTER_PER_CYCLE = 0.012; // radianes por ciclo
+let assemblyJitterUnit = 0; // se fija tras conocer fogScale, al cargar el modelo
 
 let cycleState = 'idle'; // idle | buildup | glitch | silence
 let audioStarted = false;
@@ -498,12 +514,6 @@ let warmth = 0; // 0 = frío, hasta MAX_WARMTH = punto más cálido posible
 let centralEmberIntensity = CENTRAL_EMBER_FLOOR; // brasa base, la leen los tubos que caen
 const warmableMaterials = []; // { material, baseColor } — mallas del instrumento
 let othersMaterial = null; // material compartido de los instrumentos ajenos
-let othersParticleMaterial = null;
-let othersParticleGeometry = null;
-let othersParticleBaseX = null;
-let othersParticleBaseY = null;
-let othersParticleBaseZ = null;
-let othersParticleSeeds = null;
 let centralParticleMaterial = null;
 let centralParticleGeometry = null;
 let centralParticleBaseX = null;
@@ -579,7 +589,30 @@ function armTubeForConstruction(t, index, total, fallRank) {
   t.fallGlow = 0;
 }
 
+// El "encaje" de un tubo ya armado: en el primer intento queda perfecto,
+// pero a partir de ahí lleva la marca del desgaste acumulado (ver
+// ASSEMBLY_JITTER_*), siempre desviado hacia el mismo lado para ese tubo.
+function settleTube(t) {
+  const wear = Math.min(cycleCount, DEGRADATION_MAX_CYCLES);
+  const posJitter = wear * assemblyJitterUnit;
+  const rotJitter = wear * ASSEMBLY_ROT_JITTER_PER_CYCLE;
+  t.mesh.position.copy(t.originalPosition).addScaledVector(t.jitterSeed, posJitter);
+  t.mesh.quaternion.copy(t.originalQuaternion);
+  if (rotJitter > 0) {
+    t.mesh.rotateX(t.rotJitterSeed.x * rotJitter);
+    t.mesh.rotateY(t.rotJitterSeed.y * rotJitter);
+    t.mesh.rotateZ(t.rotJitterSeed.z * rotJitter);
+  }
+}
+
 function resetCycle() {
+  cycleCount++;
+  // El instrumento suena cada vez más gastado, como una cinta que se
+  // arrastra un poco más en cada repetición fallida.
+  audio.playbackRate = Math.max(
+    AUDIO_MIN_PLAYBACK_RATE,
+    1 - Math.min(cycleCount, DEGRADATION_MAX_CYCLES) * AUDIO_DEGRADATION_PER_CYCLE
+  );
   const fallOrder = shuffledIndices(tubes.length);
   tubes.forEach((t, i) => armTubeForConstruction(t, i, tubes.length, fallOrder[i]));
   glitchTriggered = false;
@@ -669,6 +702,7 @@ loader.load(
     // ajenos, apenas una silueta parcial hasta que se camina hacia ellos.
     const fogScale = Math.max(maxDim, height);
     scene.fog.density = 0.83 / fogScale;
+    assemblyJitterUnit = fogScale * ASSEMBLY_JITTER_FRACTION_PER_CYCLE;
 
     // ---- Grieta en el suelo, cerca del central ----
     // Discreta, no dramática: la tierra no lo sostiene del todo. Levemente
@@ -687,16 +721,22 @@ loader.load(
     crack.position.set(maxDim * 0.18, FLOOR_Y + 0.004, -maxDim * 0.22);
     scene.add(crack);
 
-    // ---- Instrumentos ajenos: copias completas, perfectas y cálidas ----
-    // Los "futuros logrados de los demás": nunca se desmoronan. Para que
-    // varias copias completas (105 mallas cada una) no cuesten un draw call
-    // por malla, fusionamos toda la geometría del instrumento (aros + tubos,
-    // ya con su transform local horneado) en una sola geometría, y usamos un
-    // único InstancedMesh — el costo es el mismo sin importar cuántas copias
-    // pongamos alrededor.
+    // ---- Instrumentos ajenos: también incompletos, también a medio camino ----
+    // Ya no representan un futuro logrado: son otros intentos que tampoco
+    // llegaron. Al hornear su geometría, salteamos parte de los tubos (los
+    // aros quedan enteros) para que se lean armados a medias, igual que el
+    // central. Fusionamos todo en una sola geometría para que varias copias
+    // (una por InstancedMesh) no cuesten un draw call por malla cada una.
     const bakedGeometries = [];
+    let othersTubeIndex = 0;
     model.traverse((child) => {
       if (!child.isMesh) return;
+      const n = child.name.toLowerCase();
+      const isTube = n.includes('tubo') || n.includes('cilindro');
+      if (isTube) {
+        othersTubeIndex++;
+        if (othersTubeIndex % 3 === 0) return; // falta uno de cada tres tubos
+      }
       const g = child.geometry.clone();
       g.applyMatrix4(child.matrixWorld);
       bakedGeometries.push(g);
@@ -711,13 +751,14 @@ loader.load(
       roughness: 0.55,
       metalness: 0.28,
       emissive: COLOR_ACHIEVED.clone().multiplyScalar(0.35),
-      emissiveIntensity: OTHERS_EMISSIVE_MIN,
+      // Brasa fija, apagada, sin animar — ya no representan un logro,
+      // así que no hace falta que reaccionen al ciclo del central.
+      emissiveIntensity: OTHERS_EMISSIVE,
     });
 
     const othersMesh = new THREE.InstancedMesh(instrumentGeometry, othersMaterial, OTHERS_COUNT);
     othersMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage); // son estáticos, nunca se mueven
     const dummy = new THREE.Object3D();
-    const othersCenters = [];
     for (let i = 0; i < OTHERS_COUNT; i++) {
       const angle = (i / OTHERS_COUNT) * Math.PI * 2;
       // Lo bastante cerca como para intuirse desde el instrumento central
@@ -727,7 +768,6 @@ loader.load(
       const dist = fogScale * 1.4;
       const cx = Math.cos(angle) * dist;
       const cz = Math.sin(angle) * dist;
-      othersCenters.push({ x: cx, z: cz });
       dummy.position.set(cx, 0, cz);
       dummy.rotation.y = Math.random() * Math.PI * 2;
       dummy.updateMatrix();
@@ -736,62 +776,15 @@ loader.load(
     othersMesh.instanceMatrix.needsUpdate = true;
     scene.add(othersMesh);
 
-    // "Consagración" de los ajenos: sin luces reales de piso (6 PointLight
-    // sobre una geometría instanciada pesada resultó carísimo y tildaba la
-    // escena) — se logra con su propia brasa emisiva, más alta que antes
-    // (ver OTHERS_EMISSIVE_*), que no cuesta nada extra en el render.
-    //
     // El central sí recibe un único PointLight real, pero solo se enciende
     // brevemente en su instante de gloria (cerca del clímax) y vuelve a 0
-    // el resto del tiempo — así el costo real es casi siempre nulo.
+    // el resto del tiempo — así el costo real es casi siempre nulo. Los
+    // ajenos ya no tienen aura ni luz propia: apagados y quietos.
     centralUplight = new THREE.PointLight(UPLIGHT_COLOR, 0, height * 0.9, 2);
     centralUplight.position.set(0, height * 0.1, 0);
     scene.add(centralUplight);
 
-    // ---- Partículas: polvo de luz cálido y constante alrededor de los
-    // ajenos ("aura de perfección"), vs. apenas un puñado tenue en el
-    // central, solo al borde del clímax. Un único Points por grupo, así el
-    // costo no crece con la cantidad de partículas ni de instrumentos.
     const glowTexture = createGlowTexture();
-
-    const othersParticleCount = OTHERS_COUNT * OTHERS_PARTICLES_PER_INSTRUMENT;
-    const othersPositions = new Float32Array(othersParticleCount * 3);
-    othersParticleBaseX = new Float32Array(othersParticleCount);
-    othersParticleBaseY = new Float32Array(othersParticleCount);
-    othersParticleBaseZ = new Float32Array(othersParticleCount);
-    othersParticleSeeds = new Float32Array(othersParticleCount);
-    const auraRadius = maxDim * 0.95;
-    let p = 0;
-    othersCenters.forEach(({ x: cx, z: cz }) => {
-      for (let k = 0; k < OTHERS_PARTICLES_PER_INSTRUMENT; k++) {
-        const a = Math.random() * Math.PI * 2;
-        const r = Math.sqrt(Math.random()) * auraRadius;
-        const y = Math.random() * height;
-        const x = cx + Math.cos(a) * r;
-        const z = cz + Math.sin(a) * r;
-        othersPositions[p * 3] = x;
-        othersPositions[p * 3 + 1] = y;
-        othersPositions[p * 3 + 2] = z;
-        othersParticleBaseX[p] = x;
-        othersParticleBaseY[p] = y;
-        othersParticleBaseZ[p] = z;
-        othersParticleSeeds[p] = Math.random() * Math.PI * 2;
-        p++;
-      }
-    });
-    othersParticleGeometry = new THREE.BufferGeometry();
-    othersParticleGeometry.setAttribute('position', new THREE.BufferAttribute(othersPositions, 3));
-    othersParticleMaterial = new THREE.PointsMaterial({
-      color: COLOR_ACHIEVED,
-      size: fogScale * 0.018,
-      map: glowTexture,
-      transparent: true,
-      opacity: OTHERS_PARTICLE_OPACITY,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true,
-    });
-    scene.add(new THREE.Points(othersParticleGeometry, othersParticleMaterial));
 
     // Central: pocas, chicas y tenues — casi invisibles salvo al borde del
     // clímax, y el drenaje de `warmth` en el glitch las apaga "de golpe".
@@ -914,6 +907,11 @@ loader.load(
         assembled: false,
         assembling: false,
         fallGlow: 0, // destello de "brasa" al desprenderse, se apaga cayendo
+        // Dirección fija de imprecisión propia de este tubo: el desgaste
+        // entre ciclos escala este mismo vector, así cada reintento se
+        // desvía un poco más siempre para el mismo lado, no al azar cada vez.
+        jitterSeed: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(),
+        rotJitterSeed: { x: Math.random() - 0.5, y: Math.random() - 0.5, z: Math.random() - 0.5 },
       };
     });
 
@@ -978,8 +976,7 @@ function updateCycle(delta) {
       t.mesh.position.y += t.velocity.y * delta;
 
       if (t.mesh.position.y <= t.originalPosition.y) {
-        t.mesh.position.copy(t.originalPosition);
-        t.mesh.quaternion.copy(t.originalQuaternion);
+        settleTube(t);
         t.assembled = true;
         t.assembling = false;
         t.velocity.set(0, 0, 0);
@@ -992,8 +989,7 @@ function updateCycle(delta) {
       tubes.forEach((t) => {
         if (t.assembled) return;
         t.mesh.visible = true;
-        t.mesh.position.copy(t.originalPosition);
-        t.mesh.quaternion.copy(t.originalQuaternion);
+        settleTube(t);
         t.assembled = true;
         t.assembling = false;
       });
@@ -1175,18 +1171,8 @@ function updateColorTemperature(delta) {
   hemi.color.copy(HEMI_SKY_COLD).lerp(tmpColor, lightWarmth);
   keyLight.color.copy(KEY_LIGHT_COLD).lerp(tmpColor, lightWarmth);
 
-  // Los instrumentos ajenos se revelan de la niebla a medida que el central
-  // sube hacia su clímax, y vuelven a hundirse en la bruma tras el glitch —
-  // siempre presentes, pero solo nítidos cuando más se los "envidia".
-  const revealT = cycleT;
-  if (othersMaterial) {
-    othersMaterial.emissiveIntensity = THREE.MathUtils.lerp(OTHERS_EMISSIVE_MIN, OTHERS_EMISSIVE_MAX, revealT);
-  }
-  // Su aura de partículas acompaña el mismo revelado — constante en
-  // intensidad relativa, pero también sale de la niebla junto al cuerpo.
-  if (othersParticleMaterial) {
-    othersParticleMaterial.opacity = OTHERS_PARTICLE_OPACITY * THREE.MathUtils.lerp(0.25, 1, revealT);
-  }
+  // Los ajenos ya no reaccionan al ciclo del central: quedaron detenidos,
+  // a medio camino, con su brasa apagada fija (ver creación de othersMaterial).
 
   // El central casi nunca tiene partículas: solo asoman un puñado tenue
   // justo al borde del clímax, y se apagan de golpe apenas cae `warmth`.
@@ -1200,16 +1186,6 @@ function updateColorTemperature(delta) {
 // que no se sienta un movimiento circular perfecto. Barato: solo mueve las
 // posiciones ya guardadas, sin importar cuántos cientos de partículas haya.
 function updateParticles(time) {
-  if (othersParticleGeometry) {
-    const pos = othersParticleGeometry.attributes.position.array;
-    for (let i = 0; i < othersParticleBaseY.length; i++) {
-      const seed = othersParticleSeeds[i];
-      pos[i * 3] = othersParticleBaseX[i] + Math.sin(time * 0.35 + seed) * 0.18;
-      pos[i * 3 + 1] = othersParticleBaseY[i] + Math.sin(time * 0.5 + seed * 1.7) * 0.32;
-      pos[i * 3 + 2] = othersParticleBaseZ[i] + Math.cos(time * 0.3 + seed * 1.3) * 0.18;
-    }
-    othersParticleGeometry.attributes.position.needsUpdate = true;
-  }
   if (centralParticleGeometry) {
     const pos = centralParticleGeometry.attributes.position.array;
     for (let i = 0; i < centralParticleBaseY.length; i++) {
