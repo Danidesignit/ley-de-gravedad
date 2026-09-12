@@ -518,48 +518,6 @@ audioLowpass.connect(audioDistortion);
 audioDistortion.connect(audioMakeupGain);
 audioMakeupGain.connect(audioCtx.destination);
 
-// ---------- Audio espacial de los instrumentos ajenos ----------
-// Cada uno suena su propio fragmento, apagado y filtrado, que se escucha
-// más fuerte cuanto más cerca camina el usuario — como sintonizar una
-// radio entre varias emisoras que nunca terminan la canción. Comparten
-// el mismo AudioContext que la melodía principal (nada de abrir un
-// segundo contexto): así ambos sistemas quedan sincronizados y el
-// navegador solo pide permiso de audio una vez.
-THREE.AudioContext.setContext(audioCtx);
-const listener = new THREE.AudioListener();
-camera.add(listener);
-const othersAudioLoader = new THREE.AudioLoader();
-const othersSounds = []; // se llena al crear cada instrumento ajeno
-let othersAudioBuffer = null;
-let othersAmbiencePending = false;
-othersAudioLoader.load('/futuro_que_nunca_llega.wav', (buffer) => {
-  othersAudioBuffer = buffer;
-  othersSounds.forEach((sound) => sound.setBuffer(buffer));
-  if (othersAmbiencePending) startOthersAmbience();
-});
-
-// Recién arranca cuando el audio principal arranca (mismo gesto del
-// usuario) y ya está decodificado el buffer — lo que termine último.
-function startOthersAmbience() {
-  if (!othersAudioBuffer) {
-    othersAmbiencePending = true;
-    return;
-  }
-  othersSounds.forEach((sound) => {
-    if (!sound.isPlaying) sound.play();
-  });
-}
-function pauseOthersAmbience() {
-  othersSounds.forEach((sound) => {
-    if (sound.isPlaying) sound.pause();
-  });
-}
-function resumeOthersAmbience() {
-  othersSounds.forEach((sound) => {
-    if (sound.buffer && !sound.isPlaying) sound.play();
-  });
-}
-
 // Curva de distorsión suave (soft-clipping): a mayor `amount`, más grano
 // armónico sin llegar a puro ruido. amount = 0 deja la señal intacta.
 function makeDistortionCurve(amount) {
@@ -680,19 +638,16 @@ function startCycle() {
   audio.currentTime = 0;
   audio.volume = 0; // fundido de entrada, no arranca de golpe
   audio.play().catch((err) => console.warn('No se pudo reproducir el audio', err));
-  startOthersAmbience();
 }
 
 function pauseCycle() {
   paused = true;
   audio.pause();
-  pauseOthersAmbience();
 }
 
 function resumeCycle() {
   paused = false;
   audio.play().catch(() => {});
-  resumeOthersAmbience();
 }
 
 // Deja un tubo listo para la fase de construcción: oculto, en su posición
@@ -920,34 +875,6 @@ loader.load(
       instanceMesh.position.set(cx, 0, cz);
       instanceMesh.rotation.y = Math.random() * Math.PI * 2;
       scene.add(instanceMesh);
-
-      // Audio espacial: un fragmento propio del mismo tema, que nunca
-      // llega al estribillo (tomado siempre del tramo de build-up, antes
-      // del glitch), más apagado y más lento cuanto más incompleto es el
-      // instrumento — la misma lógica de deterioro que su geometría.
-      const sound = new THREE.PositionalAudio(listener);
-      sound.setLoop(true);
-      sound.setVolume(THREE.MathUtils.lerp(0.12, 0.38, completeness));
-      sound.setPlaybackRate(THREE.MathUtils.lerp(0.84, 0.97, completeness));
-      // Rango muy corto a propósito: en silencio total desde el centro y
-      // desde los demás instrumentos, solo aparece al caminar bien cerca
-      // de este en particular — nada de mezcla con la melodía central.
-      sound.setDistanceModel('linear');
-      sound.setRefDistance(Math.max(maxDim * 0.4, 0.35));
-      sound.setMaxDistance(maxDim * 1.3);
-      sound.setRolloffFactor(1);
-      const sonicLowpass = audioCtx.createBiquadFilter();
-      sonicLowpass.type = 'lowpass';
-      sonicLowpass.frequency.value = 500 * Math.pow(12, completeness); // ~550Hz a ~4500Hz
-      sound.setFilter(sonicLowpass);
-      const fragmentSpan = 5.5; // segundos de melodía por fragmento
-      const buildupUsable = Math.max(GLITCH_TIME - fragmentSpan - 1, fragmentSpan);
-      const fragmentStart = (i / OTHERS_COUNT) * buildupUsable + Math.random() * 1.5;
-      sound.loopStart = fragmentStart;
-      sound.loopEnd = fragmentStart + fragmentSpan;
-      if (othersAudioBuffer) sound.setBuffer(othersAudioBuffer);
-      instanceMesh.add(sound);
-      othersSounds.push(sound);
     }
     otherRingGeometries.forEach((g) => g.dispose());
     otherTubeGeometries.forEach((g) => g.dispose());
