@@ -530,22 +530,62 @@ function makeDistortionCurve(amount) {
   return curve;
 }
 
+// ---------- Ruido de glitch: el corte también se oye, no solo se ve ----------
+// El desmoronamiento se alargó bastante y un único golpe de audio al
+// principio se sentía corto. Cada pulso visual de glitch (el del inicio y
+// los que se repiten durante la caída) dispara además un breve estallido
+// de estática sintetizada — un ruido filtrado, no parte de la melodía —
+// para que el oído acompañe la corrupción tanto como la vista.
+const glitchNoiseBuffer = (() => {
+  const length = Math.floor(audioCtx.sampleRate * 0.5);
+  const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+  return buffer;
+})();
+
+function playGlitchNoise() {
+  const wear = Math.min(cycleCount, DEGRADATION_MAX_CYCLES) / DEGRADATION_MAX_CYCLES;
+  const src = audioCtx.createBufferSource();
+  src.buffer = glitchNoiseBuffer;
+
+  const bandpass = audioCtx.createBiquadFilter();
+  bandpass.type = 'bandpass';
+  bandpass.frequency.value = 1300 + Math.random() * 2400; // distinto en cada pulso
+  bandpass.Q.value = THREE.MathUtils.lerp(7, 3, wear); // más roto/ancho con el desgaste
+
+  const envelope = audioCtx.createGain();
+  const now = audioCtx.currentTime;
+  const peak = THREE.MathUtils.lerp(0.4, 0.65, wear); // más fuerte a medida que se cansa
+  envelope.gain.setValueAtTime(0, now);
+  envelope.gain.linearRampToValueAtTime(peak, now + 0.015); // ataque brusco
+  envelope.gain.exponentialRampToValueAtTime(0.001, now + 0.3); // decae rápido
+
+  // Directo a destino, sin pasar por la cadena de desgaste de la melodía:
+  // es una corrupción de la señal, no parte de la canción que se cansa.
+  src.connect(bandpass);
+  bandpass.connect(envelope);
+  envelope.connect(audioCtx.destination);
+  src.start(now);
+  src.stop(now + 0.35);
+}
+
 // ---------- Desgaste entre intentos ----------
 // Cada vuelta del loop deja una marca: el audio se oye un poco más
 // arrastrado/grave/apagado/rugoso, y el armado encaja con una imprecisión
 // creciente — la acumulación silenciosa del fracaso. Se estabiliza en un
 // techo (no crece para siempre) para que siga leyéndose como desgaste y
-// no como ruptura.
+// no como ruptura. El techo se alcanza rápido (pocos ciclos) para que el
+// cambio se note enseguida, no recién después de muchas repeticiones.
 let cycleCount = 0;
-const DEGRADATION_MAX_CYCLES = 10;
-const AUDIO_DEGRADATION_PER_CYCLE = 0.012; // el playbackRate baja esto por ciclo
-const AUDIO_MIN_PLAYBACK_RATE = 0.88;
+const DEGRADATION_MAX_CYCLES = 6;
+const AUDIO_MIN_PLAYBACK_RATE = 0.82;
 const AUDIO_LOWPASS_START = 20000; // Hz, primer intento: sin enmudecer
-const AUDIO_LOWPASS_END = 1000; // Hz, techo del desgaste: apagada, "cansada"
-const AUDIO_DISTORTION_MAX = 22; // grano/rugosidad en el techo del desgaste
-const AUDIO_MAKEUP_GAIN_MAX = 1.25; // compensa el volumen que se pierde al enmudecer
-const ASSEMBLY_JITTER_FRACTION_PER_CYCLE = 0.0035; // fracción de fogScale, por ciclo
-const ASSEMBLY_ROT_JITTER_PER_CYCLE = 0.012; // radianes por ciclo
+const AUDIO_LOWPASS_END = 900; // Hz, techo del desgaste: apagada, "cansada"
+const AUDIO_DISTORTION_MAX = 30; // grano/rugosidad en el techo del desgaste
+const AUDIO_MAKEUP_GAIN_MAX = 1.3; // compensa el volumen que se pierde al enmudecer
+const ASSEMBLY_JITTER_FRACTION_PER_CYCLE = 0.0058; // fracción de fogScale, por ciclo
+const ASSEMBLY_ROT_JITTER_PER_CYCLE = 0.02; // radianes por ciclo
 let assemblyJitterUnit = 0; // se fija tras conocer fogScale, al cargar el modelo
 
 let cycleState = 'idle'; // idle | buildup | glitch | silence
@@ -584,6 +624,7 @@ let glitchFxIntensity = 0;
 function triggerGlitchImpact() {
   shakeTimer = 0;
   glitchFxIntensity = 1;
+  playGlitchNoise();
 }
 
 function startCycle() {
@@ -659,11 +700,12 @@ function resetCycle() {
   // arrastra un poco más en cada repetición fallida: más lenta y grave
   // (playbackRate), más apagada (pasa-bajos) y más rugosa (distorsión).
   const wear = Math.min(cycleCount, DEGRADATION_MAX_CYCLES) / DEGRADATION_MAX_CYCLES;
-  audio.playbackRate = Math.max(
-    AUDIO_MIN_PLAYBACK_RATE,
-    1 - Math.min(cycleCount, DEGRADATION_MAX_CYCLES) * AUDIO_DEGRADATION_PER_CYCLE
-  );
-  audioLowpass.frequency.value = THREE.MathUtils.lerp(AUDIO_LOWPASS_START, AUDIO_LOWPASS_END, wear);
+  audio.playbackRate = THREE.MathUtils.lerp(1, AUDIO_MIN_PLAYBACK_RATE, wear);
+  // Interpolación logarítmica (no lineal en Hz): el oído percibe los
+  // graves de forma proporcional, así que bajar de 20000 a 10000 casi no
+  // se nota, pero de 4000 a 2000 sí — con escala lineal el enmudecido
+  // recién se notaba sobre el final. Así se nota ya desde el primer ciclo.
+  audioLowpass.frequency.value = AUDIO_LOWPASS_START * Math.pow(AUDIO_LOWPASS_END / AUDIO_LOWPASS_START, wear);
   audioDistortion.curve = makeDistortionCurve(AUDIO_DISTORTION_MAX * wear);
   audioMakeupGain.gain.value = THREE.MathUtils.lerp(1, AUDIO_MAKEUP_GAIN_MAX, wear);
   const fallOrder = shuffledIndices(tubes.length);
