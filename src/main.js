@@ -447,7 +447,7 @@ const GLITCH_TIME = 34.96; // segundos
 // Pausa larga y contemplativa tras el desmoronamiento: el central queda en
 // ruinas, los ajenos siguen brillando — tiempo para caminar y sentir el
 // contraste antes de que la "compulsión a repetir" reinicie el ciclo solo.
-const SILENCE_DURATION = 15; // segundos totales de calma antes de reiniciar
+const SILENCE_DURATION = 11; // segundos totales de calma antes de reiniciar
 const RUINS_FADE_DURATION = 1.8; // últimos segundos: los tubos se hunden, no desaparecen de golpe
 const AUDIO_FADE_IN = 1.6; // segundos de fundido de entrada al reiniciar el audio
 const AUDIO_FADE_OUT_DELAY = 1.8; // segundos de margen tras asentarse, para que se termine de escuchar el glitch
@@ -456,12 +456,12 @@ const GRAVITY = 9.8; // unidades/s² — caída de construcción (rápida, "enca
 // Desmoronamiento lento y largo, a propósito: más tiempo de caída y de
 // ruina antes de que empiece la pausa contemplativa, para que la pérdida
 // pese más.
-const COLLAPSE_GRAVITY = 3.0; // bastante más lenta que la de construcción: cae casi a cámara lenta
+const COLLAPSE_GRAVITY = 1.7; // muy lenta: cae de a poco, no se apura nada
 const FLOOR_Y = 0.02;
 const DROP_HEIGHT = 1.2; // altura desde la que cada tubo "cae" hasta encajar en su lugar
 const BUILD_LEAD = 1.5; // segundos que el instrumento queda completo y tenso antes del glitch
 const BUILD_DURATION = GLITCH_TIME - BUILD_LEAD; // ventana en la que se arma, uno a uno
-const FALL_STAGGER_MAX = 2.4; // ventana de desfasaje al caer, mucho más ancha: el desmoronamiento se extiende
+const FALL_STAGGER_MAX = 4.2; // ventana de desfasaje al caer, mucho más ancha: el desmoronamiento se extiende bastante
 
 // Fisher-Yates: un orden de caída realmente disperso, desacoplado de la
 // posición espacial — si no, la física (los tubos más altos tardan más en
@@ -479,8 +479,14 @@ function shuffledIndices(n) {
 // El tiempo se traba un brevísimo instante, la cámara tiembla y la imagen
 // se corrompe — los tres juntos, sincronizados exacto con el corte de audio.
 const FREEZE_DURATION = 0.16; // segundos que "el tiempo se traba" antes de caer
-const SHAKE_DURATION = 0.4; // segundos que tiembla la cámara
-const GLITCH_FX_DURATION = 0.45; // segundos que dura la distorsión visual
+const SHAKE_DURATION = 0.6; // segundos que tiembla la cámara
+const GLITCH_FX_DURATION = 0.7; // segundos que dura la distorsión visual
+// El desmoronamiento ahora es largo: un solo golpe de glitch al principio
+// se sentía corto y el resto caía en silencio visual. Van varios pulsos
+// más, repartidos a lo largo de la caída, cada vez que se cruza una
+// fracción del total de tubos ya asentados — como si la corrupción
+// volviera cada tanto, no un único estallido.
+const GLITCH_PULSE_FRACTIONS = [0.22, 0.42, 0.62, 0.82];
 
 const audio = new Audio('/futuro_que_nunca_llega.wav');
 audio.preload = 'auto';
@@ -491,15 +497,53 @@ audio.preservesPitch = false;
 audio.mozPreservesPitch = false;
 audio.webkitPreservesPitch = false;
 
+// ---------- Desgaste entre intentos: la melodía en sí se ensucia ----------
+// No alcanza con tocarla más lento: cada repetición fallida también la
+// deja sonando más apagada y más rugosa, como un instrumento que se va
+// desafinando de tanto intentarlo. Un filtro pasa-bajos progresivo (la
+// va enmudeciendo, "cansada") y una distorsión suave (le agrega grano,
+// "rugosa") se suman sobre el mismo audio, encadenados en Web Audio —
+// procesamiento nativo del navegador, no cuesta nada en el frame.
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const audioSource = audioCtx.createMediaElementSource(audio);
+const audioLowpass = audioCtx.createBiquadFilter();
+audioLowpass.type = 'lowpass';
+audioLowpass.frequency.value = 20000; // sin filtrar en el primer intento
+const audioDistortion = audioCtx.createWaveShaper();
+audioDistortion.oversample = '2x';
+const audioMakeupGain = audioCtx.createGain();
+audioMakeupGain.gain.value = 1;
+audioSource.connect(audioLowpass);
+audioLowpass.connect(audioDistortion);
+audioDistortion.connect(audioMakeupGain);
+audioMakeupGain.connect(audioCtx.destination);
+
+// Curva de distorsión suave (soft-clipping): a mayor `amount`, más grano
+// armónico sin llegar a puro ruido. amount = 0 deja la señal intacta.
+function makeDistortionCurve(amount) {
+  const samples = 2048;
+  const curve = new Float32Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const x = (i * 2) / samples - 1;
+    curve[i] = amount <= 0 ? x : ((3 + amount) * x * 20 * (Math.PI / 180)) / (Math.PI + amount * Math.abs(x));
+  }
+  return curve;
+}
+
 // ---------- Desgaste entre intentos ----------
 // Cada vuelta del loop deja una marca: el audio se oye un poco más
-// arrastrado/grave, y el armado encaja con una imprecisión creciente — la
-// acumulación silenciosa del fracaso. Se estabiliza en un techo (no crece
-// para siempre) para que siga leyéndose como desgaste y no como ruptura.
+// arrastrado/grave/apagado/rugoso, y el armado encaja con una imprecisión
+// creciente — la acumulación silenciosa del fracaso. Se estabiliza en un
+// techo (no crece para siempre) para que siga leyéndose como desgaste y
+// no como ruptura.
 let cycleCount = 0;
 const DEGRADATION_MAX_CYCLES = 10;
 const AUDIO_DEGRADATION_PER_CYCLE = 0.012; // el playbackRate baja esto por ciclo
 const AUDIO_MIN_PLAYBACK_RATE = 0.88;
+const AUDIO_LOWPASS_START = 20000; // Hz, primer intento: sin enmudecer
+const AUDIO_LOWPASS_END = 1000; // Hz, techo del desgaste: apagada, "cansada"
+const AUDIO_DISTORTION_MAX = 22; // grano/rugosidad en el techo del desgaste
+const AUDIO_MAKEUP_GAIN_MAX = 1.25; // compensa el volumen que se pierde al enmudecer
 const ASSEMBLY_JITTER_FRACTION_PER_CYCLE = 0.0035; // fracción de fogScale, por ciclo
 const ASSEMBLY_ROT_JITTER_PER_CYCLE = 0.012; // radianes por ciclo
 let assemblyJitterUnit = 0; // se fija tras conocer fogScale, al cargar el modelo
@@ -529,6 +573,7 @@ let ambientParticleBaseZ = null;
 let ambientParticleSeeds = null;
 let ambientTopY = 10;
 let freezeTimer = 0;
+let nextGlitchPulseIndex = 0; // próximo pulso de GLITCH_PULSE_FRACTIONS a disparar
 let shakeTimer = Infinity; // Infinity = sin shake activo
 let SHAKE_MAGNITUDE = 0.08; // se recalcula según la escala del modelo
 const shakeOffset = new THREE.Vector3();
@@ -544,6 +589,9 @@ function triggerGlitchImpact() {
 function startCycle() {
   if (audioStarted) return;
   audioStarted = true;
+  // El AudioContext arranca "suspended" hasta el primer gesto del usuario
+  // (política de autoplay del navegador) — este click ya es ese gesto.
+  if (audioCtx.state === 'suspended') audioCtx.resume();
   cycleState = 'buildup';
   glitchTriggered = false;
   audio.currentTime = 0;
@@ -608,11 +656,16 @@ function settleTube(t) {
 function resetCycle() {
   cycleCount++;
   // El instrumento suena cada vez más gastado, como una cinta que se
-  // arrastra un poco más en cada repetición fallida.
+  // arrastra un poco más en cada repetición fallida: más lenta y grave
+  // (playbackRate), más apagada (pasa-bajos) y más rugosa (distorsión).
+  const wear = Math.min(cycleCount, DEGRADATION_MAX_CYCLES) / DEGRADATION_MAX_CYCLES;
   audio.playbackRate = Math.max(
     AUDIO_MIN_PLAYBACK_RATE,
     1 - Math.min(cycleCount, DEGRADATION_MAX_CYCLES) * AUDIO_DEGRADATION_PER_CYCLE
   );
+  audioLowpass.frequency.value = THREE.MathUtils.lerp(AUDIO_LOWPASS_START, AUDIO_LOWPASS_END, wear);
+  audioDistortion.curve = makeDistortionCurve(AUDIO_DISTORTION_MAX * wear);
+  audioMakeupGain.gain.value = THREE.MathUtils.lerp(1, AUDIO_MAKEUP_GAIN_MAX, wear);
   const fallOrder = shuffledIndices(tubes.length);
   tubes.forEach((t, i) => armTubeForConstruction(t, i, tubes.length, fallOrder[i]));
   glitchTriggered = false;
@@ -1005,6 +1058,7 @@ function updateCycle(delta) {
       glitchTriggered = true;
       cycleState = 'freeze';
       freezeTimer = 0;
+      nextGlitchPulseIndex = 0;
       triggerGlitchImpact(); // shake + distorsión visual, en el mismo instante
       console.log('Glitch — el tiempo se traba');
     }
@@ -1023,11 +1077,15 @@ function updateCycle(delta) {
 
   if (cycleState === 'glitch') {
     let allSettled = tubes.length > 0;
+    let settledCount = 0;
     tubes.forEach((t) => {
       // La brasa sigue enfriándose incluso después de aterrizar.
       if (t.fallGlow > 0) t.fallGlow = Math.max(0, t.fallGlow - delta / FALL_GLOW_DURATION);
 
-      if (t.settled) return;
+      if (t.settled) {
+        settledCount++;
+        return;
+      }
       allSettled = false;
 
       if (!t.falling) {
@@ -1052,8 +1110,21 @@ function updateCycle(delta) {
       if (t.mesh.position.y <= FLOOR_Y) {
         t.mesh.position.y = FLOOR_Y;
         t.settled = true;
+        settledCount++;
       }
     });
+
+    // Varios pulsos de glitch repartidos a lo largo de la caída (no solo
+    // el del principio): la corrupción vuelve cada tanto mientras el
+    // instrumento se sigue desmoronando.
+    const settledFraction = tubes.length > 0 ? settledCount / tubes.length : 0;
+    while (
+      nextGlitchPulseIndex < GLITCH_PULSE_FRACTIONS.length &&
+      settledFraction >= GLITCH_PULSE_FRACTIONS[nextGlitchPulseIndex]
+    ) {
+      triggerGlitchImpact();
+      nextGlitchPulseIndex++;
+    }
 
     if (allSettled) {
       cycleState = 'silence';
