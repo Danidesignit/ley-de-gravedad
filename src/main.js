@@ -721,28 +721,27 @@ loader.load(
     crack.position.set(maxDim * 0.18, FLOOR_Y + 0.004, -maxDim * 0.22);
     scene.add(crack);
 
-    // ---- Instrumentos ajenos: también incompletos, también a medio camino ----
-    // Ya no representan un futuro logrado: son otros intentos que tampoco
-    // llegaron. Al hornear su geometría, salteamos parte de los tubos (los
-    // aros quedan enteros) para que se lean armados a medias, igual que el
-    // central. Fusionamos todo en una sola geometría para que varias copias
-    // (una por InstancedMesh) no cuesten un draw call por malla cada una.
-    const bakedGeometries = [];
-    let othersTubeIndex = 0;
+    // ---- Instrumentos ajenos: cada uno detenido en un punto distinto de
+    // su propio fracaso ----. Ya no representan un futuro logrado: son
+    // otros intentos que tampoco llegaron a completarse. Guardamos por
+    // separado los aros (el molde, siempre entero) y los tubos, para
+    // poder armar cada copia con una cantidad de tubos propia y distinta.
+    // Como cada copia tiene su propia geometría, ya no pueden compartir
+    // un único InstancedMesh — pero son solo OTHERS_COUNT mallas estáticas,
+    // el costo extra de draw calls es insignificante.
+    const otherRingGeometries = [];
+    const otherTubeGeometries = [];
     model.traverse((child) => {
       if (!child.isMesh) return;
       const n = child.name.toLowerCase();
-      const isTube = n.includes('tubo') || n.includes('cilindro');
-      if (isTube) {
-        othersTubeIndex++;
-        if (othersTubeIndex % 3 === 0) return; // falta uno de cada tres tubos
-      }
       const g = child.geometry.clone();
       g.applyMatrix4(child.matrixWorld);
-      bakedGeometries.push(g);
+      if (n.includes('tubo') || n.includes('cilindro')) {
+        otherTubeGeometries.push(g);
+      } else {
+        otherRingGeometries.push(g);
+      }
     });
-    const instrumentGeometry = mergeGeometries(bakedGeometries, false);
-    bakedGeometries.forEach((g) => g.dispose());
 
     othersMaterial = new THREE.MeshStandardMaterial({
       color: COLOR_ACHIEVED,
@@ -756,9 +755,6 @@ loader.load(
       emissiveIntensity: OTHERS_EMISSIVE,
     });
 
-    const othersMesh = new THREE.InstancedMesh(instrumentGeometry, othersMaterial, OTHERS_COUNT);
-    othersMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage); // son estáticos, nunca se mueven
-    const dummy = new THREE.Object3D();
     for (let i = 0; i < OTHERS_COUNT; i++) {
       const angle = (i / OTHERS_COUNT) * Math.PI * 2;
       // Lo bastante cerca como para intuirse desde el instrumento central
@@ -768,13 +764,25 @@ loader.load(
       const dist = fogScale * 1.4;
       const cx = Math.cos(angle) * dist;
       const cz = Math.sin(angle) * dist;
-      dummy.position.set(cx, 0, cz);
-      dummy.rotation.y = Math.random() * Math.PI * 2;
-      dummy.updateMatrix();
-      othersMesh.setMatrixAt(i, dummy.matrix);
+
+      // Grado de incompletitud propio de esta copia: de "bastante armado,
+      // sin llegar a terminar" a "casi nada" — con algo de variación
+      // propia, no una gradiente prolija y regular.
+      const t = OTHERS_COUNT > 1 ? i / (OTHERS_COUNT - 1) : 0;
+      let completeness = THREE.MathUtils.lerp(0.82, 0.06, t) + (Math.random() - 0.5) * 0.1;
+      completeness = THREE.MathUtils.clamp(completeness, 0.04, 0.9);
+      const tubeOrder = shuffledIndices(otherTubeGeometries.length);
+      const keepCount = Math.round(otherTubeGeometries.length * completeness);
+      const keptTubes = tubeOrder.slice(0, keepCount).map((idx) => otherTubeGeometries[idx]);
+
+      const instanceGeometry = mergeGeometries([...otherRingGeometries, ...keptTubes], false);
+      const instanceMesh = new THREE.Mesh(instanceGeometry, othersMaterial);
+      instanceMesh.position.set(cx, 0, cz);
+      instanceMesh.rotation.y = Math.random() * Math.PI * 2;
+      scene.add(instanceMesh);
     }
-    othersMesh.instanceMatrix.needsUpdate = true;
-    scene.add(othersMesh);
+    otherRingGeometries.forEach((g) => g.dispose());
+    otherTubeGeometries.forEach((g) => g.dispose());
 
     // El central sí recibe un único PointLight real, pero solo se enciende
     // brevemente en su instante de gloria (cerca del clímax) y vuelve a 0
