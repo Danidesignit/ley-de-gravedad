@@ -518,6 +518,48 @@ audioLowpass.connect(audioDistortion);
 audioDistortion.connect(audioMakeupGain);
 audioMakeupGain.connect(audioCtx.destination);
 
+// ---------- Audio espacial de los instrumentos ajenos: discos trabados ----------
+// El central suena porque se está construyendo; los ajenos ya no están en
+// construcción, quedaron detenidos en su fracaso. No deben sonar como una
+// canción en progreso, sino como un disco trabado: un pedacito cortísimo
+// de la melodía, justo hasta donde ese intento llegó, repitiéndose en
+// loop sin avanzar nunca. Comparten el mismo AudioContext que la melodía
+// principal, nada de un segundo contexto ni un segundo pedido de permiso.
+THREE.AudioContext.setContext(audioCtx);
+const listener = new THREE.AudioListener();
+camera.add(listener);
+const othersAudioLoader = new THREE.AudioLoader();
+const othersSounds = []; // se llena al crear cada instrumento ajeno
+let othersAudioBuffer = null;
+let othersAmbiencePending = false;
+othersAudioLoader.load('/futuro_que_nunca_llega.wav', (buffer) => {
+  othersAudioBuffer = buffer;
+  othersSounds.forEach((sound) => sound.setBuffer(buffer));
+  if (othersAmbiencePending) startOthersAmbience();
+});
+
+// Recién arranca cuando el audio principal arranca (mismo gesto del
+// usuario) y ya está decodificado el buffer — lo que termine último.
+function startOthersAmbience() {
+  if (!othersAudioBuffer) {
+    othersAmbiencePending = true;
+    return;
+  }
+  othersSounds.forEach((sound) => {
+    if (!sound.isPlaying) sound.play();
+  });
+}
+function pauseOthersAmbience() {
+  othersSounds.forEach((sound) => {
+    if (sound.isPlaying) sound.pause();
+  });
+}
+function resumeOthersAmbience() {
+  othersSounds.forEach((sound) => {
+    if (sound.buffer && !sound.isPlaying) sound.play();
+  });
+}
+
 // Curva de distorsión suave (soft-clipping): a mayor `amount`, más grano
 // armónico sin llegar a puro ruido. amount = 0 deja la señal intacta.
 function makeDistortionCurve(amount) {
@@ -638,16 +680,19 @@ function startCycle() {
   audio.currentTime = 0;
   audio.volume = 0; // fundido de entrada, no arranca de golpe
   audio.play().catch((err) => console.warn('No se pudo reproducir el audio', err));
+  startOthersAmbience();
 }
 
 function pauseCycle() {
   paused = true;
   audio.pause();
+  pauseOthersAmbience();
 }
 
 function resumeCycle() {
   paused = false;
   audio.play().catch(() => {});
+  resumeOthersAmbience();
 }
 
 // Deja un tubo listo para la fase de construcción: oculto, en su posición
@@ -875,6 +920,43 @@ loader.load(
       instanceMesh.position.set(cx, 0, cz);
       instanceMesh.rotation.y = Math.random() * Math.PI * 2;
       scene.add(instanceMesh);
+
+      // Disco trabado: un recorte cortísimo del mismo tema, congelado en
+      // el punto donde ESTE intento se frenó — cuanto más incompleta la
+      // estructura, antes se cortó (recorte tomado más temprano en el
+      // build-up), y más apagado/lento suena, la misma lógica de
+      // deterioro que ya usa su geometría.
+      const sound = new THREE.PositionalAudio(listener);
+      sound.setLoop(true);
+      sound.setVolume(THREE.MathUtils.lerp(0.12, 0.35, completeness));
+      sound.setPlaybackRate(THREE.MathUtils.lerp(0.8, 0.96, completeness));
+      // Rango corto a propósito: silencio desde el centro y entre ellos,
+      // solo aparece al caminar bien cerca de este en particular.
+      sound.setDistanceModel('linear');
+      sound.setRefDistance(Math.max(maxDim * 0.4, 0.35));
+      sound.setMaxDistance(maxDim * 1.3);
+      sound.setRolloffFactor(1);
+      const sonicLowpass = audioCtx.createBiquadFilter();
+      sonicLowpass.type = 'lowpass';
+      sonicLowpass.frequency.value = 450 * Math.pow(11, completeness); // ~500Hz a ~4400Hz
+      sound.setFilter(sonicLowpass);
+      // Recorte muy corto (menos de dos segundos): no se "escucha una
+      // canción", suena a aguja trabada repitiendo el mismo instante.
+      const fragmentSpan = THREE.MathUtils.lerp(0.85, 1.55, Math.random());
+      const buildupUsable = Math.max(GLITCH_TIME - fragmentSpan - 1, fragmentSpan);
+      // El punto de corte sigue el propio nivel de avance del instrumento:
+      // el más incompleto se frenó casi al empezar, el más armado llegó
+      // bastante más lejos antes de trabarse.
+      const fragmentStart = THREE.MathUtils.clamp(
+        completeness * buildupUsable + (Math.random() - 0.5) * 0.8,
+        0,
+        buildupUsable
+      );
+      sound.loopStart = fragmentStart;
+      sound.loopEnd = fragmentStart + fragmentSpan;
+      if (othersAudioBuffer) sound.setBuffer(othersAudioBuffer);
+      instanceMesh.add(sound);
+      othersSounds.push(sound);
     }
     otherRingGeometries.forEach((g) => g.dispose());
     otherTubeGeometries.forEach((g) => g.dispose());
