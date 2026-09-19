@@ -612,6 +612,61 @@ function playGlitchNoise() {
   src.stop(now + 0.35);
 }
 
+// ---------- Cola del glitch: el corte real se estira, no solo se ve ----------
+// El glitch que trae el propio audio (el corte editado a los 34.96s) dura
+// apenas unos 3.5 segundos — muy corto para lo dramático que tiene que
+// sentirse "se rompió todo". En vez de tocar el archivo, en el instante
+// del glitch armamos una fuente aparte que retoma justo donde ese corte
+// real termina y lo repite un par de veces más, con una reverb sintética
+// liviana — el quiebre hace eco y se apaga solo, en vez de cortar seco.
+// Usa el mismo buffer ya decodificado para el audio espacial de los
+// ajenos: no hay una segunda descarga ni una segunda decodificación.
+const GLITCH_SEGMENT_DURATION = 3.5; // segundos (41.5-45s del audio original)
+const GLITCH_TAIL_REPEATS = 3; // veces que se repite el corte, además del real
+function createReverbImpulse(ctx, duration = 2.2, decay = 3.2) {
+  const length = Math.floor(ctx.sampleRate * duration);
+  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = impulse.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+  }
+  return impulse;
+}
+const glitchTailReverb = audioCtx.createConvolver();
+glitchTailReverb.buffer = createReverbImpulse(audioCtx);
+glitchTailReverb.connect(audioCtx.destination);
+
+function playGlitchTail() {
+  if (!othersAudioBuffer) return; // buffer completo del tema, ya decodificado
+  const src = audioCtx.createBufferSource();
+  src.buffer = othersAudioBuffer;
+  src.loop = true;
+  src.loopStart = GLITCH_TIME;
+  src.loopEnd = GLITCH_TIME + GLITCH_SEGMENT_DURATION;
+
+  // Hereda el mismo nivel de desgaste del ciclo actual (el filtro de la
+  // melodía principal ya lo tiene calculado) — también suena cansada.
+  const tailLowpass = audioCtx.createBiquadFilter();
+  tailLowpass.type = 'lowpass';
+  tailLowpass.frequency.value = audioLowpass.frequency.value;
+
+  const tailGain = audioCtx.createGain();
+  const now = audioCtx.currentTime;
+  const startAt = now + GLITCH_SEGMENT_DURATION; // retoma justo donde termina el corte real
+  const totalTailDuration = GLITCH_SEGMENT_DURATION * GLITCH_TAIL_REPEATS;
+  tailGain.gain.setValueAtTime(0.5, startAt);
+  tailGain.gain.setValueAtTime(0.5, startAt + totalTailDuration - 1.4);
+  tailGain.gain.linearRampToValueAtTime(0, startAt + totalTailDuration); // se apaga solo, no de golpe
+
+  src.connect(tailLowpass);
+  tailLowpass.connect(tailGain);
+  tailGain.connect(glitchTailReverb);
+  src.start(startAt, GLITCH_TIME);
+  src.stop(startAt + totalTailDuration + 0.1);
+}
+
 // ---------- Desgaste entre intentos ----------
 // Cada vuelta del loop deja una marca: el audio se oye un poco más
 // arrastrado/grave/apagado/rugoso, y el armado encaja con una imprecisión
@@ -1184,6 +1239,7 @@ function updateCycle(delta) {
       freezeTimer = 0;
       nextGlitchPulseIndex = 0;
       triggerGlitchImpact(); // shake + distorsión visual, en el mismo instante
+      playGlitchTail(); // estira el corte real del audio con eco + reverb
       console.log('Glitch — el tiempo se traba');
     }
     return;
