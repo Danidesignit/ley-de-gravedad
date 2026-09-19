@@ -14,6 +14,7 @@ const FLOOR_COLOR = 0x414d57; // piso sutil, casi fundido con la niebla
 // pleno (MAX_WARMTH < 1), y drena de golpe al glitch.
 const COLOR_COLD = new THREE.Color(FOG_COLOR);
 const COLOR_WARM = new THREE.Color(0xb6735b); // mezcla ámbar (#A85C3A) / rosa polvo
+const CENTRAL_TUBE_BASE_EMISSIVE = COLOR_WARM.clone().multiplyScalar(0.35); // brasa de reposo de los tubos
 const MAX_WARMTH = 0.72;
 const COLD_HOLD = 5; // segundos de frío puro al inicio antes de empezar a entibiar
 
@@ -516,7 +517,43 @@ audioMakeupGain.gain.value = 1;
 audioSource.connect(audioLowpass);
 audioLowpass.connect(audioDistortion);
 audioDistortion.connect(audioMakeupGain);
-audioMakeupGain.connect(audioCtx.destination);
+
+// ---------- Análisis en vivo: los tubos del central laten con la música ----------
+// Se engancha DESPUÉS del desgaste (pasa-bajos + distorsión), así el
+// análisis "escucha" lo mismo que el oído — incluida la propia melodía
+// enmudeciéndose en ciclos avanzados, que entonces también apaga solo la
+// banda de agudos sin necesitar ningún caso especial.
+const audioAnalyser = audioCtx.createAnalyser();
+audioAnalyser.fftSize = 512;
+audioAnalyser.smoothingTimeConstant = 0.78; // suaviza el parpadeo cuadro a cuadro
+const audioFreqData = new Uint8Array(audioAnalyser.frequencyBinCount);
+audioMakeupGain.connect(audioAnalyser);
+audioAnalyser.connect(audioCtx.destination);
+
+// Tres bandas simples (graves / medios / agudos), en bins de FFT — no hace
+// falta más resolución para tres grupos de tubos.
+const AUDIO_BAND_RANGES_HZ = [
+  [20, 250],
+  [250, 2000],
+  [2000, 8000],
+];
+const audioBandBinRanges = AUDIO_BAND_RANGES_HZ.map(([lo, hi]) => {
+  const hzPerBin = audioCtx.sampleRate / audioAnalyser.fftSize;
+  return [Math.max(0, Math.floor(lo / hzPerBin)), Math.min(audioFreqData.length - 1, Math.ceil(hi / hzPerBin))];
+});
+function readBandEnergies() {
+  audioAnalyser.getByteFrequencyData(audioFreqData);
+  return audioBandBinRanges.map(([from, to]) => {
+    let sum = 0;
+    for (let i = from; i <= to; i++) sum += audioFreqData[i];
+    return sum / (to - from + 1) / 255;
+  });
+}
+// Acentos dentro de la misma familia melancólica que ya usa la obra (la
+// gama rosa polvo → violeta → ámbar de ATMO_STOPS), solo más intensos:
+// graves = vino, medios = violeta, agudos = ámbar.
+const AUDIO_BAND_COLORS = [new THREE.Color(0xb44a5e), new THREE.Color(0x8a5ea3), new THREE.Color(0xd99a52)];
+const AUDIO_REACTIVE_INTENSITY_MAX = 0.9; // notorio pero sin llegar a estridente
 
 // ---------- Audio espacial de los instrumentos ajenos: discos trabados ----------
 // El central suena porque se está construyendo; los ajenos ya no están en
@@ -1114,7 +1151,7 @@ loader.load(
     const worldPos = new THREE.Vector3();
     const worldQuat = new THREE.Quaternion();
     const worldScale = new THREE.Vector3();
-    tubes = tubeMeshes.map((mesh) => {
+    tubes = tubeMeshes.map((mesh, tubeIndex) => {
       mesh.getWorldPosition(worldPos);
       mesh.getWorldQuaternion(worldQuat);
       mesh.getWorldScale(worldScale);
@@ -1152,6 +1189,8 @@ loader.load(
         // desvía un poco más siempre para el mismo lado, no al azar cada vez.
         jitterSeed: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(),
         rotJitterSeed: { x: Math.random() - 0.5, y: Math.random() - 0.5, z: Math.random() - 0.5 },
+        // A qué banda de frecuencia responde este tubo (graves/medios/agudos).
+        bandIndex: tubeIndex % AUDIO_BAND_COLORS.length,
       };
     });
 
@@ -1415,12 +1454,21 @@ function updateColorTemperature(delta) {
   warmableMaterials.forEach(({ material }) => {
     if ('emissiveIntensity' in material) material.emissiveIntensity = centralEmberIntensity;
   });
-  // Encima de esa base, el destello de los tubos que se están cayendo —
-  // cada uno con su propio material clonado, así no se contagian entre sí.
+  // Encima de esa base, dos capas más por tubo — cada uno con su propio
+  // material clonado, así no se contagian entre sí:
+  // 1) el destello de los que se están cayendo, y
+  // 2) el pulso de color que sigue a la música: cada tubo "escucha" una
+  //    banda de frecuencia distinta (ver bandIndex) y se enciende con el
+  //    acento de esa banda cuando suena fuerte — crece con el build-up
+  //    (cycleT) y se corta solo en el glitch, porque cycleT cae de golpe.
+  const audioBandEnergies = readBandEnergies();
   tubes.forEach((t) => {
-    if (t.fallGlow > 0 && 'emissiveIntensity' in t.mesh.material) {
-      t.mesh.material.emissiveIntensity = centralEmberIntensity + t.fallGlow * FALL_GLOW_BOOST;
-    }
+    const mat = t.mesh.material;
+    if (!('emissiveIntensity' in mat)) return;
+    const reactiveT = audioBandEnergies[t.bandIndex] * cycleT;
+    mat.emissive.copy(CENTRAL_TUBE_BASE_EMISSIVE).lerp(AUDIO_BAND_COLORS[t.bandIndex], reactiveT);
+    const fallBoost = t.fallGlow > 0 ? t.fallGlow * FALL_GLOW_BOOST : 0;
+    mat.emissiveIntensity = centralEmberIntensity + fallBoost + reactiveT * AUDIO_REACTIVE_INTENSITY_MAX;
   });
 
   // Las luces siguen la misma paleta atmosférica, más sutilmente — la luz
