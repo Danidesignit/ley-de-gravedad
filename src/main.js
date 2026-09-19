@@ -550,10 +550,16 @@ function readBandEnergies() {
   });
 }
 // Acentos dentro de la misma familia melancólica que ya usa la obra (la
-// gama rosa polvo → violeta → ámbar de ATMO_STOPS), solo más intensos:
-// graves = vino, medios = violeta, agudos = ámbar.
-const AUDIO_BAND_COLORS = [new THREE.Color(0xb44a5e), new THREE.Color(0x8a5ea3), new THREE.Color(0xd99a52)];
-const AUDIO_REACTIVE_INTENSITY_MAX = 0.9; // notorio pero sin llegar a estridente
+// gama rosa polvo → violeta → ámbar de ATMO_STOPS): graves = vino, medios
+// = violeta, agudos = ámbar. Desaturados hacia el gris-azul de la niebla
+// para que combinen con el entorno en vez de saltar como color puro.
+const AUDIO_BAND_COLORS = [
+  new THREE.Color(0xb44a5e).lerp(new THREE.Color(FOG_COLOR), 0.4),
+  new THREE.Color(0x8a5ea3).lerp(new THREE.Color(FOG_COLOR), 0.4),
+  new THREE.Color(0xd99a52).lerp(new THREE.Color(FOG_COLOR), 0.4),
+];
+const AUDIO_REACTIVE_INTENSITY_MAX = 0.42; // bajado bastante: se nota, no encandila
+const AUDIO_COLOR_MIX_MAX = 0.5; // nunca llega al acento puro, se queda mezclado
 
 // ---------- Audio espacial de los instrumentos ajenos: discos trabados ----------
 // El central suena porque se está construyendo; los ajenos ya no están en
@@ -1466,7 +1472,7 @@ function updateColorTemperature(delta) {
     const mat = t.mesh.material;
     if (!('emissiveIntensity' in mat)) return;
     const reactiveT = audioBandEnergies[t.bandIndex] * cycleT;
-    mat.emissive.copy(CENTRAL_TUBE_BASE_EMISSIVE).lerp(AUDIO_BAND_COLORS[t.bandIndex], reactiveT);
+    mat.emissive.copy(CENTRAL_TUBE_BASE_EMISSIVE).lerp(AUDIO_BAND_COLORS[t.bandIndex], reactiveT * AUDIO_COLOR_MIX_MAX);
     const fallBoost = t.fallGlow > 0 ? t.fallGlow * FALL_GLOW_BOOST : 0;
     mat.emissiveIntensity = centralEmberIntensity + fallBoost + reactiveT * AUDIO_REACTIVE_INTENSITY_MAX;
   });
