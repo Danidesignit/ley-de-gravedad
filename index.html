@@ -274,7 +274,9 @@
       .cta-text {
         transition: text-shadow 0.4s ease;
       }
-      .cta-text--resume {
+      .cta-text--resume,
+      .cta-text--loading,
+      .cta-text--error {
         display: none;
       }
       #blocker.is-paused .cta-text--start {
@@ -289,6 +291,50 @@
       #blocker:hover .cta-mark {
         color: var(--ink);
         filter: drop-shadow(0 0 8px rgba(var(--glow), 0.55));
+      }
+
+      /* ---------- Estado de carga: mientras el modelo/audio no estén
+         listos, el click no hace nada y el CTA lo deja claro — nunca se
+         entra a una escena vacía por haber cargado antes de tiempo. ---------- */
+      #blocker.is-loading {
+        cursor: default;
+      }
+      #blocker.is-loading .cta-text--start,
+      #blocker.is-loading .cta-text--resume {
+        display: none;
+      }
+      #blocker.is-loading .cta-text--loading {
+        display: inline;
+      }
+      #blocker.is-loading .cta-mark {
+        animation: loading-pulse 1.3s ease-in-out infinite;
+      }
+      @keyframes loading-pulse {
+        0%,
+        100% {
+          opacity: 0.25;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+      .cta-loading-pct {
+        font-variant-numeric: tabular-nums;
+        color: var(--ink-faint);
+      }
+      #blocker.is-error {
+        cursor: default;
+      }
+      #blocker.is-error .cta-text--start,
+      #blocker.is-error .cta-text--resume,
+      #blocker.is-error .cta-text--loading {
+        display: none;
+      }
+      #blocker.is-error .cta-text--error {
+        display: inline;
+      }
+      #blocker.is-error .cta-mark {
+        color: #b4636a;
       }
 
       /* ---------- Controles: teclas dibujadas, no texto con guiones.
@@ -417,7 +463,7 @@
     </style>
   </head>
   <body>
-    <div id="blocker">
+    <div id="blocker" class="is-loading">
       <div id="grain"></div>
       <div id="atmos" aria-hidden="true">
         <span class="bokeh bokeh--a"></span>
@@ -471,6 +517,8 @@
           </svg>
           <span class="cta-text cta-text--start">click para caminar</span>
           <span class="cta-text cta-text--resume">click para continuar</span>
+          <span class="cta-text cta-text--loading">cargando el instrumento<span class="cta-loading-pct"></span>…</span>
+          <span class="cta-text cta-text--error">no se pudo cargar, recargá la página</span>
           <svg class="cta-mark" viewBox="0 0 20 20" aria-hidden="true">
             <path
               d="M10,1 C11.8,7.3 12.7,8.2 19,10 C12.7,11.8 11.8,12.7 10,19 C8.2,12.7 7.3,11.8 1,10 C7.3,8.2 8.2,7.3 10,1 Z"

@@ -275,6 +275,7 @@ const MOVE_DAMPING = 5; // aceleración/frenado del caminar (antes 10 = brusco)
 const lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
+const _moveDir = new THREE.Vector3(); // reusado cada frame, no se crea uno nuevo
 
 function moveForward(distance) {
   _forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -290,6 +291,25 @@ function moveRight(distance) {
 }
 
 const blocker = document.getElementById('blocker');
+const ctaLoadingPct = blocker.querySelector('.cta-loading-pct');
+
+// ---------- Estado de carga ----------
+// El modelo (~1.8MB) y el audio (~3.3MB) pueden tardar en conexiones
+// lentas; mientras tanto el CTA queda inerte y avisa "cargando" en vez
+// de dejar entrar a una escena sin el instrumento todavía armado. (El
+// audio en sí se declara más abajo — acá solo quedan las funciones,
+// que no lo necesitan hasta que se llaman.)
+let pendingAssets = 2; // modelo + audio
+function markAssetReady() {
+  pendingAssets = Math.max(0, pendingAssets - 1);
+  if (pendingAssets === 0) {
+    blocker.classList.remove('is-loading');
+  }
+}
+function markLoadError() {
+  blocker.classList.remove('is-loading');
+  blocker.classList.add('is-error');
+}
 
 document.addEventListener('pointerlockchange', () => {
   isLocked = document.pointerLockElement === document.body;
@@ -317,6 +337,9 @@ document.addEventListener('mousemove', (e) => {
 });
 
 blocker.addEventListener('click', () => {
+  // Mientras carga (o si falló), el click no hace nada — nunca se entra
+  // a una escena sin el instrumento todavía armado.
+  if (blocker.classList.contains('is-loading') || blocker.classList.contains('is-error')) return;
   document.body.requestPointerLock();
   if (!audioStarted) {
     startCycle(); // primer click: además de entrar, arranca el ciclo audio + caída
@@ -497,6 +520,12 @@ audio.preload = 'auto';
 audio.preservesPitch = false;
 audio.mozPreservesPitch = false;
 audio.webkitPreservesPitch = false;
+if (audio.readyState >= 4) {
+  markAssetReady(); // ya estaba en caché del navegador
+} else {
+  audio.addEventListener('canplaythrough', () => markAssetReady(), { once: true });
+  audio.addEventListener('error', () => markLoadError(), { once: true });
+}
 
 // ---------- Desgaste entre intentos: la melodía en sí se ensucia ----------
 // No alcanza con tocarla más lento: cada repetición fallida también la
@@ -1212,14 +1241,18 @@ loader.load(
       fogDensity: scene.fog.density,
       tubos: tubes.length,
     });
+    if (ctaLoadingPct) ctaLoadingPct.textContent = '';
+    markAssetReady();
   },
   (xhr) => {
     if (xhr.total) {
-      console.log(`Cargando modelo: ${((xhr.loaded / xhr.total) * 100).toFixed(0)}%`);
+      const pct = Math.round((xhr.loaded / xhr.total) * 100);
+      if (ctaLoadingPct) ctaLoadingPct.textContent = ` ${pct}%`;
     }
   },
   (error) => {
     console.error('Error cargando blender.glb', error);
+    markLoadError();
   }
 );
 
@@ -1569,7 +1602,7 @@ function animate() {
     velocity.x -= velocity.x * MOVE_DAMPING * delta;
     velocity.z -= velocity.z * MOVE_DAMPING * delta;
 
-    const dir = new THREE.Vector3(
+    const dir = _moveDir.set(
       Number(move.right) - Number(move.left),
       0,
       Number(move.forward) - Number(move.back)
