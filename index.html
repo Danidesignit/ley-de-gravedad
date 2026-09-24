@@ -7,19 +7,21 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Space+Grotesk:wght@300;400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Archivo:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap"
       rel="stylesheet"
     />
     <style>
       :root {
-        /* Paleta fría, azulada: el mismo frío melancólico que la niebla
-           de la escena, no un cálido de vela. */
-        --ink: #dfe6ee;
-        --ink-dim: #9caebd;
-        --ink-faint: #6d7f8e;
+        /* Paleta copiada de la presentación final: negro-verdoso profundo
+           con resplandor teal, blanco cálido para los títulos (Fraunces),
+           gris frío para el cuerpo (Archivo). */
+        --ink: #f3efe8;
+        --ink-dim: #b7bcc3;
+        --ink-faint: #868d95;
         --ink-soft: #d8dfe5;
-        --glow: 176, 205, 230;
-        --veil: rgba(11, 14, 18, 0.5);
+        --accent: #83bdce;
+        --glow: 131, 189, 206;
+        --veil: rgba(6, 13, 16, 0.55);
       }
 
       html,
@@ -51,7 +53,7 @@
         cursor: pointer;
         z-index: 10;
         background:
-          radial-gradient(ellipse 60% 52% at 50% 42%, rgba(8, 10, 14, 0.32), rgba(8, 10, 14, 0) 72%),
+          radial-gradient(ellipse 62% 55% at 28% 30%, rgba(20, 62, 74, 0.4), rgba(6, 13, 16, 0) 72%),
           var(--veil);
         backdrop-filter: blur(15px) brightness(0.6) saturate(0.8);
         -webkit-backdrop-filter: blur(15px) brightness(0.6) saturate(0.8);
@@ -202,12 +204,12 @@
 
       .title {
         margin: 0;
-        font-family: 'Cinzel', 'Cormorant Garamond', serif;
+        font-family: 'Fraunces', 'Cormorant Garamond', serif;
+        font-optical-sizing: auto;
         font-weight: 600;
-        text-transform: uppercase;
-        font-size: clamp(1.9rem, 4.6vw, 3.1rem);
-        line-height: 1.3;
-        letter-spacing: 0.05em;
+        font-size: clamp(2.1rem, 5vw, 3.4rem);
+        line-height: 1.18;
+        letter-spacing: -0.005em;
         color: var(--ink);
         text-wrap: balance;
         text-shadow: 0 0 10px rgba(var(--glow), 0.4), 0 0 26px rgba(var(--glow), 0.2), 0 0 52px rgba(var(--glow), 0.1);
@@ -242,13 +244,13 @@
       }
 
       .subtitle {
-        margin: 0;
-        font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+        margin: 0.3rem 0 0;
+        font-family: 'Fraunces', 'Cormorant Garamond', serif;
         font-style: italic;
         font-weight: 400;
         font-size: clamp(0.95rem, 1.7vw, 1.15rem);
-        letter-spacing: 0.045em;
-        color: var(--ink-dim);
+        letter-spacing: 0.01em;
+        color: var(--accent);
       }
 
       .cta {
@@ -257,7 +259,7 @@
         align-items: center;
         justify-content: center;
         gap: 0.85rem;
-        font-family: 'Space Grotesk', sans-serif;
+        font-family: 'Archivo', sans-serif;
         font-weight: 500;
         font-size: clamp(0.85rem, 1.5vw, 1rem);
         letter-spacing: 0.15em;
@@ -371,7 +373,7 @@
         box-sizing: border-box;
         border: 1px solid var(--ink-dim);
         border-radius: 5px;
-        font-family: 'Space Grotesk', sans-serif;
+        font-family: 'Archivo', sans-serif;
         font-size: 0.78rem;
         font-weight: 500;
         font-style: normal;
@@ -386,7 +388,7 @@
       }
       .keys-or {
         margin: 0 0.35rem;
-        font-family: 'Cormorant Garamond', serif;
+        font-family: 'Archivo', sans-serif;
         font-style: italic;
         font-size: 0.82rem;
         color: var(--ink-faint);
@@ -424,24 +426,24 @@
         filter: drop-shadow(0 0 8px rgba(var(--glow), 0.18));
       }
       .control-label {
-        font-family: 'Space Grotesk', sans-serif;
+        font-family: 'Archivo', sans-serif;
         font-weight: 400;
         font-size: clamp(0.62rem, 1vw, 0.7rem);
         letter-spacing: 0.14em;
         text-transform: uppercase;
-        color: var(--ink-dim);
+        color: var(--accent);
       }
 
       .context {
         margin: 1.6rem auto 0;
         max-width: min(680px, 82vw);
-        font-family: 'Cormorant Garamond', 'Times New Roman', serif;
-        font-style: italic;
-        font-weight: 400;
+        font-family: 'Archivo', sans-serif;
+        font-style: normal;
+        font-weight: 300;
         font-size: clamp(0.9rem, 1.25vw, 1.05rem);
-        line-height: 1.8;
-        letter-spacing: 0.006em;
-        color: var(--ink-soft);
+        line-height: 1.75;
+        letter-spacing: 0.001em;
+        color: var(--ink-dim);
       }
       #blocker.is-paused .context {
         display: none;
@@ -454,7 +456,7 @@
         bottom: 1.7rem;
         margin: 0;
         text-align: center;
-        font-family: 'Space Grotesk', sans-serif;
+        font-family: 'Archivo', sans-serif;
         font-weight: 300;
         font-size: 0.64rem;
         letter-spacing: 0.07em;
