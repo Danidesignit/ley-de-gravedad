@@ -557,7 +557,15 @@ audioAnalyser.fftSize = 512;
 audioAnalyser.smoothingTimeConstant = 0.78; // suaviza el parpadeo cuadro a cuadro
 const audioFreqData = new Uint8Array(audioAnalyser.frequencyBinCount);
 audioMakeupGain.connect(audioAnalyser);
-audioAnalyser.connect(audioCtx.destination);
+
+// Ganancia maestra: un solo lugar donde bajar el volumen general (música
+// principal + ambiente de los ajenos + FX de glitch) sin tocar el
+// balance relativo entre ellos — todo pasa por acá antes del destino.
+const masterGain = audioCtx.createGain();
+masterGain.gain.value = 0.8; // reducción suave y pareja
+masterGain.connect(audioCtx.destination);
+
+audioAnalyser.connect(masterGain);
 
 // Tres bandas simples (graves / medios / agudos), en bins de FFT — no hace
 // falta más resolución para tres grupos de tubos.
@@ -600,6 +608,11 @@ const AUDIO_COLOR_MIX_MAX = 0.5; // nunca llega al acento puro, se queda mezclad
 THREE.AudioContext.setContext(audioCtx);
 const listener = new THREE.AudioListener();
 camera.add(listener);
+// El listener conecta su salida directo a destino por defecto — la
+// desviamos a la ganancia maestra para que los 6 ajenos bajen junto con
+// todo lo demás, sin tocar el volumen propio de cada uno entre sí.
+listener.gain.disconnect();
+listener.gain.connect(masterGain);
 const othersAudioLoader = new THREE.AudioLoader();
 const othersSounds = []; // se llena al crear cada instrumento ajeno
 let othersAudioBuffer = null;
@@ -675,11 +688,12 @@ function playGlitchNoise() {
   envelope.gain.linearRampToValueAtTime(peak, now + 0.015); // ataque brusco
   envelope.gain.exponentialRampToValueAtTime(0.001, now + 0.3); // decae rápido
 
-  // Directo a destino, sin pasar por la cadena de desgaste de la melodía:
-  // es una corrupción de la señal, no parte de la canción que se cansa.
+  // A la ganancia maestra (sin pasar por la cadena de desgaste de la
+  // melodía): es una corrupción de la señal, no parte de la canción que
+  // se cansa, pero igual tiene que bajar junto con todo lo demás.
   src.connect(bandpass);
   bandpass.connect(envelope);
-  envelope.connect(audioCtx.destination);
+  envelope.connect(masterGain);
   src.start(now);
   src.stop(now + 0.35);
 }
@@ -708,7 +722,7 @@ function createReverbImpulse(ctx, duration = 2.2, decay = 3.2) {
 }
 const glitchTailReverb = audioCtx.createConvolver();
 glitchTailReverb.buffer = createReverbImpulse(audioCtx);
-glitchTailReverb.connect(audioCtx.destination);
+glitchTailReverb.connect(masterGain);
 
 function playGlitchTail() {
   if (!othersAudioBuffer) return; // buffer completo del tema, ya decodificado
